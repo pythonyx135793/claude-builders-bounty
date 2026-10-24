@@ -221,7 +221,7 @@ def sql_reason(source):
         following = tokens[i + 1] if i + 1 < len(tokens) else None
         if word == "DROP" and following == ("TABLE", level):
             return "DROP TABLE removes a table."
-        if word == "TRUNCATE" and (i == 0 or tokens[i - 1][0] in {";", "("}):
+        if word == "TRUNCATE" and (i == 0 or tokens[i - 1][0] == ";"):
             return "TRUNCATE removes all rows."
         if word == "DELETE" and following == ("FROM", level):
             has_where = False

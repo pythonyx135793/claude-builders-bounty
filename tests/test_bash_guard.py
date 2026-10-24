@@ -124,6 +124,7 @@ class InstalledHookTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.blocked(command, "TRUNCATE")
         self.allowed("truncate -s 0 ordinary-file.log")
+        self.allowed('mysql -e "SELECT COALESCE(TRUNCATE(12.34, 1), 0)"')
 
     def test_delete_without_where(self):
         for command in ['DELETE FROM users;', 'delete\nfrom users', "psql -c 'DELETE /* gap */ FROM users;'",
