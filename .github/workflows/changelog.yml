@@ -1,0 +1,44 @@
+name: Changelog Git integration
+
+on:
+  push:
+    branches: [codex/structured-changelog-r620]
+  pull_request:
+    paths:
+      - 'changelog.sh'
+      - 'changelog.py'
+      - 'tests/**'
+      - 'samples/**'
+      - '.github/workflows/changelog.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  changelog:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Source and installed tools
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD 'HEAD^{tree}'
+          bash --version | head -n 1
+          python3 --version
+          git --version
+          bash -n changelog.sh
+          git diff --check
+      - name: Actual Bash entry point against controlled Git histories
+        run: python3 -B tests/test_changelog.py
+      - name: Reproduce real tagged GitHub history sample
+        run: |
+          set -euo pipefail
+          git clone --no-checkout https://github.com/pallets/markupsafe.git "$RUNNER_TEMP/markupsafe-sample"
+          git -C "$RUNNER_TEMP/markupsafe-sample" checkout --detach 4e111271b1494995708a9e878a10829b5e10c7ba
+          python3 -B tests/check_sample.py "$RUNNER_TEMP/markupsafe-sample"
+          cat samples/CHANGELOG.markupsafe.md
+          git diff --exit-code
