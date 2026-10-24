@@ -50,6 +50,7 @@ class InstalledHookTests(unittest.TestCase):
     def blocked(self, command, reason):
         result = self.invoke(command)
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotEqual(result.stdout, b"", "Expected a deny decision; hook returned no decision")
         output = json.loads(result.stdout)["hookSpecificOutput"]
         self.assertEqual(output["hookEventName"], "PreToolUse")
         self.assertEqual(output["permissionDecision"], "deny")
@@ -80,6 +81,20 @@ class InstalledHookTests(unittest.TestCase):
 
     def test_rm_nonrecursive_and_option_terminator(self):
         for command in ["rm file.txt", "rm -r example", "rm -f example", "rm -- -rf", "rm -r -- -f"]:
+            with self.subTest(command=command):
+                self.allowed(command)
+
+    def test_literal_env_split_string_and_time_wrappers(self):
+        for command in ["env -S 'rm -rf synthetic-example'",
+                        "env --split-string='git push --force'",
+                        "time -p rm -rf synthetic-example"]:
+            with self.subTest(command=command):
+                self.blocked(command, "Blocked:")
+
+    def test_safe_env_split_string_and_time_wrappers(self):
+        for command in ["env -S 'git status'", "env --split-string='git push origin main'",
+                        "time -p git status", "env -S 'echo \"rm -rf example\"'",
+                        "env --split-string 'printf \"%s\" \"git push --force\"'"]:
             with self.subTest(command=command):
                 self.allowed(command)
 

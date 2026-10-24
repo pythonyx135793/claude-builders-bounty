@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import stat
 import sys
 from dataclasses import dataclass
@@ -257,14 +258,25 @@ def executable_words(tokens):
                 continue
             words.append(token.text)
     while words:
-        if re.match(r"^[A-Za-z_][A-Za-z_0-9]*=", words[0]) or words[0] in {"!", "if", "then", "do", "elif", "time"}:
+        if re.match(r"^[A-Za-z_][A-Za-z_0-9]*=", words[0]) or words[0] in {"!", "if", "then", "do", "elif"}:
             words.pop(0)
-        elif words[0] in {"sudo", "env", "command", "exec", "nohup"}:
+        elif words[0] in {"sudo", "env", "command", "exec", "nohup", "time"}:
             wrapper = words.pop(0)
             while words and words[0].startswith("-"):
                 option = words.pop(0)
                 if option == "--":
                     break
+                if wrapper == "env" and (option in {"-S", "--split-string"} or option.startswith("--split-string=") or option.startswith("-S")):
+                    if option in {"-S", "--split-string"}:
+                        if not words:
+                            raise ValueError("env split-string is missing its literal argument")
+                        value = words.pop(0)
+                    else:
+                        value = option.split("=", 1)[1] if option.startswith("--") else option[2:]
+                    # env splits literal words; it does not run shell operators
+                    # or substitutions inside this already-quoted argument.
+                    words[:0] = shlex.split(value, comments=False, posix=True)
+                    continue
                 if option in ({"-u", "-g", "-h", "-p", "-C", "-R", "-D"} if wrapper == "sudo" else {"-u", "--unset", "-C", "--chdir"}):
                     if words:
                         words.pop(0)
