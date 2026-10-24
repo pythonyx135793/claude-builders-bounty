@@ -1,0 +1,49 @@
+name: Bash guard protocol integration
+
+on:
+  push:
+    branches: [codex/bash-safety-hook-r666]
+  pull_request:
+    paths:
+      - 'hooks/**'
+      - 'install_hook.py'
+      - 'tests/test_bash_guard.py'
+      - '.github/workflows/bash-guard.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  protocol:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Exact source and installed tools
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD 'HEAD^{tree}'
+          python3 --version
+          git --version
+          sha256sum hooks/bash_guard.py install_hook.py tests/test_bash_guard.py docs/bash-guard.md README.md
+          git diff --check
+          python3 -B - <<'PY'
+          import ast
+          from pathlib import Path
+          for path in ['hooks/bash_guard.py', 'install_hook.py', 'tests/test_bash_guard.py']:
+              ast.parse(Path(path).read_text(encoding='utf-8'), filename=path)
+          print('Python syntax: PASS')
+          PY
+      - name: Installed hook and settings in a network namespace
+        run: |
+          set -euo pipefail
+          sudo unshare --net -- bash -euo pipefail -c '
+            test -z "$(ip route show)"
+            printf "Network namespace has no external routes.\n"
+            python3 -B -m unittest discover -s tests -v
+          '
+          git diff --exit-code

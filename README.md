@@ -51,3 +51,23 @@ You're in the right place.
 ---
 
 *Started by the Claude builder community · March 2026 · MIT License*
+
+## Bash safety hook (#3)
+
+Requires Python 3.9+ and Claude Code 2.1.295+ with the Bash tool. From this
+checkout, install with one command:
+
+```bash
+python3 install_hook.py
+```
+
+This copies the hook to `~/.claude/hooks/bash_guard.py` and registers it in
+`~/.claude/settings.json`, preserving unrelated settings and hooks. Restart
+Claude Code afterward and check its `/hooks` menu. `CLAUDE_CONFIG_DIR` or
+`--config-dir PATH` selects an alternate configuration directory.
+
+The hook denies recursive forced removal, forced Git pushes, `DROP TABLE`,
+`TRUNCATE`, and `DELETE FROM` without a same-statement `WHERE`. It records
+blocked commands in `hooks/blocked.log`. Other commands retain Claude Code's
+normal permission checks. See the [policy, examples and tests](docs/bash-guard.md)
+for supported syntax and limits.
