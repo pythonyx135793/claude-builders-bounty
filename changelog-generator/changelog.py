@@ -5,6 +5,7 @@ import html
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 import tempfile
@@ -125,6 +126,13 @@ def write_snapshot(root, output, content):
                                          dir=target.parent, prefix=".changelog-", delete=False) as handle:
             temporary = Path(handle.name)
             handle.write(content)
+        if target.exists():
+            mode = stat.S_IMODE(target.stat().st_mode)
+        else:
+            umask = os.umask(0)
+            os.umask(umask)
+            mode = 0o666 & ~umask
+        os.chmod(temporary, mode)
         os.replace(temporary, target)
     finally:
         if temporary is not None and temporary.exists():

@@ -221,6 +221,22 @@ class ChangelogCLI(unittest.TestCase):
         self.assertIn(b"Shallow history", result.stderr)
         self.assertEqual((shallow / "CHANGELOG.md").read_text(), "old history")
 
+    def test_new_output_is_not_owner_only(self):
+        self.commit("add content")
+        self.run_cli()
+        mode = (self.repo / "CHANGELOG.md").stat().st_mode & 0o777
+        umask = os.umask(0)
+        os.umask(umask)
+        self.assertEqual(mode, 0o666 & ~umask)
+
+    def test_replaced_output_keeps_existing_mode(self):
+        self.commit("add content")
+        target = self.repo / "CHANGELOG.md"
+        target.write_text("old")
+        target.chmod(0o640)
+        self.run_cli()
+        self.assertEqual(target.stat().st_mode & 0o777, 0o640)
+
     def test_missing_git_is_a_nonzero_error(self):
         env = os.environ.copy()
         env["PATH"] = str(self.base / "nonexistent")
