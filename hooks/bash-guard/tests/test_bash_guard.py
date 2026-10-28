@@ -5,6 +5,7 @@ from datetime import datetime
 import json
 import os
 from pathlib import Path
+import shlex
 import stat
 import subprocess
 import sys
@@ -43,8 +44,9 @@ class InstalledHookTests(unittest.TestCase):
     def raw(self, body):
         settings = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
         hook = settings["hooks"]["PreToolUse"][-1]["hooks"][0]
-        # Documented exec-form invocation: the command under inspection is ONLY stdin.
-        return subprocess.run([hook["command"], *hook["args"]], input=body,
+        # Run the registered command string through a shell, as Claude Code does.
+        # The command under inspection is ONLY stdin.
+        return subprocess.run(hook["command"], shell=True, input=body,
                               capture_output=True, env=self.env, timeout=10)
 
     def blocked(self, command, reason):
@@ -289,7 +291,7 @@ class InstalledHookTests(unittest.TestCase):
         self.install()
         self.assertEqual((self.config / "settings.json").read_bytes(), original)
         self.assertEqual((self.config / "hooks" / "blocked.log").read_bytes(), log)
-        self.assertEqual((self.config / "hooks" / "bash_guard.py").read_bytes(), (ROOT / "hooks" / "bash_guard.py").read_bytes())
+        self.assertEqual((self.config / "hooks" / "bash_guard.py").read_bytes(), (ROOT / "bash_guard.py").read_bytes())
 
     def test_installer_preserves_unrelated_settings_and_neighbor_hooks(self):
         path = self.config / "settings.json"
@@ -323,16 +325,36 @@ class InstalledHookTests(unittest.TestCase):
         self.assertTrue((alternate / "hooks" / "bash_guard.py").is_file())
         self.assertTrue((self.config / "hooks" / "bash_guard.py").is_file())
 
-    def test_registration_uses_current_protocol_and_fail_closed_startup(self):
+    def test_registration_uses_portable_single_command_string(self):
         settings = json.loads((self.config / "settings.json").read_text(encoding="utf-8"))
         entry = settings["hooks"]["PreToolUse"][0]
         self.assertEqual(entry["matcher"], "Bash")
         handler = entry["hooks"][0]
-        self.assertEqual(handler["onFailure"], "block")
-        self.assertNotIn("async", handler)
+        self.assertEqual(set(handler), {"type", "command", "timeout"})
         self.assertEqual(handler["timeout"], 10)
-        self.assertEqual(handler["args"], ["-B", str(self.config / "hooks" / "bash_guard.py")])
-        self.assertEqual(Path(handler["command"]), Path(sys.executable).resolve())
+        self.assertIsInstance(handler["command"], str)
+        if os.name == "posix":
+            self.assertEqual(shlex.split(handler["command"]),
+                             [str(Path(sys.executable).resolve()), "-B", str(self.config / "hooks" / "bash_guard.py")])
+        # Quoted paths (spaces, quote, dollar, non-ASCII) must survive the shell.
+        self.blocked("rm -rf example", "recursive and force")
+
+    def test_launchers_running_rm_rf_are_blocked(self):
+        for command in ["find . -exec rm -rf {} +", "find . -name x -execdir rm -rf {} \\;",
+                        "find . -type d -ok rm -rf {} ';'", "ls | xargs rm -rf", "echo x | xargs -n 1 rm -rf",
+                        "echo x | xargs -I{} rm -rf {}", "echo x | xargs -I {} -- rm -rf {}",
+                        "timeout 5 rm -rf x", "timeout -s KILL 5 rm -rf x", "nice rm -rf x", "nice -n 5 rm -rf x",
+                        "doas rm -rf x", "doas -u root rm -rf x", "stdbuf -oL rm -rf x",
+                        "stdbuf -o L rm -rf x", "nohup rm -rf x", "find . -exec git push --force \\;"]:
+            with self.subTest(command=command):
+                self.blocked(command, "Blocked:")
+
+    def test_benign_launcher_commands_are_allowed(self):
+        for command in ["find . -name x -print", "find . -exec ls {} +", "find . -exec echo rm -rf {} \\;",
+                        "xargs echo", "ls | xargs rm", "ls | xargs -n 1 rm -f", "timeout 5 git status",
+                        "nice -n 5 make", "doas ls", "stdbuf -oL cat file", "find . -name 'rm -rf'"]:
+            with self.subTest(command=command):
+                self.allowed(command)
 
     @staticmethod
     def shell_quote(value):

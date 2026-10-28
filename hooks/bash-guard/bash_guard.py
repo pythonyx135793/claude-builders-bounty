@@ -16,6 +16,17 @@ MAX_INPUT = 1024 * 1024
 MAX_DEPTH = 16
 SQL_CLIENTS = {"psql", "mysql", "mariadb", "sqlite3", "sqlcmd", "duckdb"}
 SHELLS = {"sh", "bash", "dash", "zsh", "ksh"}
+# Wrapper options that consume the next word; env/others default to -u/-C style.
+OPTIONS_WITH_VALUE = {
+    "sudo": {"-u", "-g", "-h", "-p", "-C", "-R", "-D"},
+    "doas": {"-u", "-C"},
+    "nice": {"-n", "--adjustment"},
+    "timeout": {"-s", "--signal", "-k", "--kill-after"},
+    "stdbuf": {"-i", "-o", "-e", "--input", "--output", "--error"},
+}
+FIND_EXEC = {"-exec", "-execdir", "-ok", "-okdir"}
+XARGS_OPTIONS_WITH_VALUE = {"-I", "-n", "-L", "-P", "-s", "-d", "-E", "-a", "--arg-file", "--delimiter",
+                            "--max-args", "--max-lines", "--max-procs", "--max-chars", "--eof", "--replace"}
 
 
 @dataclass
@@ -260,7 +271,7 @@ def executable_words(tokens):
     while words:
         if re.match(r"^[A-Za-z_][A-Za-z_0-9]*=", words[0]) or words[0] in {"!", "if", "then", "do", "elif"}:
             words.pop(0)
-        elif words[0] in {"sudo", "env", "command", "exec", "nohup", "time"}:
+        elif words[0] in {"sudo", "doas", "env", "command", "exec", "nohup", "time", "nice", "timeout", "stdbuf"}:
             wrapper = words.pop(0)
             while words and words[0].startswith("-"):
                 option = words.pop(0)
@@ -277,9 +288,11 @@ def executable_words(tokens):
                     # or substitutions inside this already-quoted argument.
                     words[:0] = shlex.split(value, comments=False, posix=True)
                     continue
-                if option in ({"-u", "-g", "-h", "-p", "-C", "-R", "-D"} if wrapper == "sudo" else {"-u", "--unset", "-C", "--chdir"}):
+                if option in OPTIONS_WITH_VALUE.get(wrapper, {"-u", "--unset", "-C", "--chdir"}):
                     if words:
                         words.pop(0)
+            if wrapper == "timeout" and words:
+                words.pop(0)  # the duration
         else:
             break
     return words, inputs
@@ -315,6 +328,32 @@ def command_reason(command, depth=0):
         if not words:
             continue
         name, args = words[0].rsplit("/", 1)[-1], words[1:]
+        launched = []
+        if name == "find":
+            j = 0
+            while j < len(args):
+                if args[j] in FIND_EXEC:
+                    end = j + 1
+                    while end < len(args) and args[end] not in {";", "+"}:
+                        end += 1
+                    launched.append(args[j + 1:end])
+                    j = end
+                j += 1
+        elif name == "xargs":
+            j = 0
+            while j < len(args) and args[j].startswith("-"):
+                option = args[j]
+                j += 1
+                if option == "--":
+                    break
+                if option in XARGS_OPTIONS_WITH_VALUE:
+                    j += 1
+            launched.append(args[j:])
+        for sub in launched:
+            if sub:
+                reason = command_reason(shlex.join(sub), depth + 1)
+                if reason:
+                    return reason
         if name == "rm":
             recursive, force = False, False
             for arg in args:

@@ -5,6 +5,8 @@ import argparse
 import json
 import os
 from pathlib import Path
+import shlex
+import subprocess
 import sys
 import tempfile
 
@@ -23,6 +25,13 @@ def atomic_write(path, data, mode):
             os.unlink(temporary)
 
 
+def command_line(executable, script):
+    """Quote both paths for the shell Claude Code uses to run hook commands."""
+    if os.name == "nt":
+        return subprocess.list2cmdline([executable, "-B", script])
+    return " ".join(shlex.quote(part) for part in (executable, "-B", script))
+
+
 def install(config):
     config = config.expanduser().resolve()
     settings_path = config / "settings.json"
@@ -39,19 +48,19 @@ def install(config):
         raise ValueError("PreToolUse must contain matcher objects with hook lists")
     destination = config / "hooks" / "bash_guard.py"
     executable = str(Path(sys.executable).resolve())
-    handler = {"type": "command", "command": executable,
-               "args": ["-B", str(destination)], "timeout": 10, "onFailure": "block"}
+    # The long-standing single-string form works on every Claude Code version.
+    handler = {"type": "command", "command": command_line(executable, str(destination)), "timeout": 10}
     # Replace only this installed script's handler; retain neighboring handlers.
     remaining = []
     for entry in entries:
         kept = [item for item in entry["hooks"] if not (
             isinstance(item, dict) and item.get("type") == "command"
-            and item.get("args") == handler["args"])]
+            and item.get("command") == handler["command"])]
         if kept or not entry["hooks"]:
             remaining.append({**entry, "hooks": kept})
     remaining.append({"matcher": "Bash", "hooks": [handler]})
     hooks["PreToolUse"] = remaining
-    source = Path(__file__).resolve().parent / "hooks" / "bash_guard.py"
+    source = Path(__file__).resolve().parent / "bash_guard.py"
     data = source.read_bytes()
     serialized = (json.dumps(settings, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     config.mkdir(parents=True, exist_ok=True, mode=0o700)
